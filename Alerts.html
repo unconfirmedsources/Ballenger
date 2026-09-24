@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frederick County Public Safety & Emergency Broadcast Portal</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Font Family -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #1f2937; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+        .pulse-red { animation: pulse-red 2s infinite; }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .leaflet-container { background-color: #111827; }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen flex flex-col antialiased">
+
+    <!-- Emergency Ticker Banner -->
+    <div id="ticker-banner" class="bg-red-950/80 border-b border-red-800 text-red-200 text-sm px-4 py-2 flex items-center justify-between">
+        <div class="flex items-center space-x-3 overflow-hidden">
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-600 text-white uppercase animate-pulse">
+                Active Watch
+            </span>
+            <div id="ticker-text" class="truncate font-medium">
+                Frederick County Division of Emergency Management: Monitoring severe weather and local traffic operations.
+            </div>
+        </div>
+        <button onclick="toggleTicker()" class="text-red-400 hover:text-white text-xs underline shrink-0 ml-4">
+            Dismiss
+        </button>
+    </div>
+
+    <!-- Header Navigation -->
+    <header class="bg-gray-900 border-b border-gray-800 sticky top-0 z-30">
+        <div class="max-w-7xl mx-mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <!-- Brand / Logo -->
+                <div class="flex items-center space-x-3">
+                    <div class="p-2 bg-blue-600/20 text-blue-500 rounded-lg border border-blue-500/30">
+                        <i data-lucide="shield-alert" class="w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-lg leading-tight text-white flex items-center gap-2">
+                            Frederick County Emergency Portal
+                            <span class="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded border border-gray-700">MD</span>
+                        </h1>
+                        <p class="text-xs text-gray-400">Consolidated Public Safety & Agency Incident Broadcasts</p>
+                    </div>
+                </div>
+
+                <!-- Action Controls -->
+                <div class="flex items-center space-x-3">
+                    <button onclick="openSimulationModal()" class="px-3 py-1.5 text-xs font-medium bg-amber-600/20 border border-amber-500/40 text-amber-300 hover:bg-amber-600/30 rounded-lg transition flex items-center gap-1.5">
+                        <i data-lucide="radio-receiver" class="w-4 h-4"></i>
+                        <span>Simulate Alert</span>
+                    </button>
+                    <button onclick="fetchLatestAlerts()" class="p-2 text-gray-400 hover:text-white bg-gray-800 rounded-lg hover:bg-gray-700 transition" title="Refresh Live Feed">
+                        <i data-lucide="refresh-cw" class="w-4 h-4" id="refresh-icon"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Sidebar / Filter Controls (3 cols) -->
+        <aside class="lg:col-span-3 space-y-6">
+            <!-- Filter Box -->
+            <div class="bg-gray-900 rounded-xl border border-gray-800 p-4 space-y-4">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-sm font-semibold text-gray-200 uppercase tracking-wider flex items-center gap-2">
+                        <i data-lucide="filter" class="w-4 h-4 text-blue-400"></i>
+                        Filter Feeds
+                    </h2>
+                    <button onclick="resetFilters()" class="text-xs text-gray-400 hover:text-white underline">Reset</button>
+                </div>
+
+                <!-- Agency Type -->
+                <div class="space-y-1.5">
+                    <label class="text-xs text-gray-400 font-medium">Public Safety Agency</label>
+                    <select id="filter-agency" onchange="applyFilters()" class="w-full bg-gray-950 border border-gray-800 rounded-lg text-xs p-2.5 text-gray-200 focus:ring-1 focus:ring-blue-500 focus:outline-none">
+                        <option value="all">All Agencies</option>
+                        <option value="fcso">Frederick County Sheriff's Office</option>
+                        <option value="fpd">Frederick City Police Dept</option>
+                        <option value="fcfir">Frederick Co. Fire & Rescue (DFERS)</option>
+                        <option value="fdem">Division of Emergency Management</option>
+                        <option value="msh">Maryland State Highway (MDOT SHA)</option>
+                        <option value="fcpw">Frederick Co. Public Works</option>
+                    </select>
+                </div>
+
+                <!-- Severity Level -->
+                <div class="space-y-1.5">
+                    <label class="text-xs text-gray-400 font-medium">Alert Severity</label>
+                    <select id="filter-severity" onchange="applyFilters()" class="w-full bg-gray-950 border border-gray-800 rounded-lg text-xs p-2.5 text-gray-200 focus:ring-1 focus:ring-blue-500 focus:outline-none">
+                        <option value="all">All Severity Levels</option>
+                        <option value="Critical">Critical / Evacuation</option>
+                        <option value="Warning">Warning / High Priority</option>
+                        <option value="Advisory">Advisory / Traffic</option>
+                        <option value="Information">General Information</option>
+                    </select>
+                </div>
+
+                <!-- Sort Order -->
+                <div class="space-y-1.5">
+                    <label class="text-xs text-gray-400 font-medium">Sort Chronology</label>
+                    <select id="filter-sort" onchange="applyFilters()" class="w-full bg-gray-950 border border-gray-800 rounded-lg text-xs p-2.5 text-gray-200 focus:ring-1 focus:ring-blue-500 focus:outline-none">
+                        <option value="newest">Newest First (Chronological)</option>
+                        <option value="oldest">Oldest First</option>
+                        <option value="priority">Highest Severity Priority</option>
+                    </select>
+                </div>
+
+                <!-- Quick Toggles -->
+                <div class="pt-2 border-t border-gray-800 space-y-2">
+                    <label class="flex items-center text-xs text-gray-300 cursor-pointer">
+                        <input type="checkbox" id="toggle-pinned" onchange="applyFilters()" class="rounded bg-gray-950 border-gray-700 text-blue-600 focus:ring-0 mr-2">
+                        Show Pinned / Active Road Closures
+                    </label>
+                    <label class="flex items-center text-xs text-gray-300 cursor-pointer">
+                        <input type="checkbox" id="toggle-saved" onchange="applyFilters()" class="rounded bg-gray-950 border-gray-700 text-blue-600 focus:ring-0 mr-2">
+                        Bookmarked Alerts Only
+                    </label>
+                </div>
+            </div>
+
+            <!-- Quick Contacts Box -->
+            <div class="bg-gray-900 rounded-xl border border-gray-800 p-4 space-y-3 text-xs">
+                <h3 class="font-semibold text-gray-200 flex items-center gap-2">
+                    <i data-lucide="phone-call" class="w-4 h-4 text-emerald-400"></i>
+                    Frederick Emergency Contacts
+                </h3>
+                <ul class="space-y-2 text-gray-400">
+                    <li class="flex justify-between border-b border-gray-800 pb-1">
+                        <span>Emergency Services:</span>
+                        <strong class="text-red-400 font-mono">911</strong>
+                    </li>
+                    <li class="flex justify-between border-b border-gray-800 pb-1">
+                        <span>FCSO Non-Emergency:</span>
+                        <strong class="text-gray-200 font-mono">(301) 600-1046</strong>
+                    </li>
+                    <li class="flex justify-between border-b border-gray-800 pb-1">
+                        <span>City Police Dispatch:</span>
+                        <strong class="text-gray-200 font-mono">(301) 600-2100</strong>
+                    </li>
+                    <li class="flex justify-between border-b border-gray-800 pb-1">
+                        <span>Co. Roads Maintenance:</span>
+                        <strong class="text-gray-200 font-mono">(301) 600-1564</strong>
+                    </li>
+                    <li class="flex justify-between">
+                        <span>Maryland 511 Traffic:</span>
+                        <strong class="text-blue-400 font-mono">511</strong>
+                    </li>
+                </ul>
+            </div>
+        </aside>
+
+        <!-- Central Timeline Feed (9 cols on lg layout, split into feed + map view) -->
+        <section class="lg:col-span-9 space-y-4">
+            
+            <!-- Feed Stats & Status -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
+                <div class="flex items-center space-x-3">
+                    <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></div>
+                    <span class="text-xs font-medium text-gray-300">
+                        Live System Monitor: <span id="active-alert-count" class="text-white font-bold">--</span> Active Alerts Logged
+                    </span>
+                </div>
+                <div class="text-xs text-gray-400 flex items-center gap-2">
+                    <span>Region: <strong>Frederick County, MD</strong></span>
+                    <span>•</span>
+                    <span id="last-updated-time">Updated just now</span>
+                </div>
+            </div>
+
+            <!-- Main Timeline Stream -->
+            <div id="alert-feed-container" class="space-y-4 min-h-[500px]">
+                <!-- Dynamic Alert Cards Inserted Here -->
+            </div>
+
+        </section>
+    </main>
+
+    <!-- Detailed View & Map Modal -->
+    <div id="detail-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+            <!-- Modal Header -->
+            <div class="p-5 border-b border-gray-800 flex items-start justify-between bg-gray-950">
+                <div class="space-y-1">
+                    <div id="modal-badge-container" class="flex items-center gap-2"></div>
+                    <h3 id="modal-title" class="text-xl font-bold text-white mt-1">--</h3>
+                    <p id="modal-subtitle" class="text-xs text-gray-400">--</p>
+                </div>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-white p-1 bg-gray-800 rounded-lg">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <!-- Modal Content & Map -->
+            <div class="p-6 overflow-y-auto space-y-6 custom-scrollbar flex-1">
+                <!-- Incident Summary -->
+                <div>
+                    <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Official Advisory Details</h4>
+                    <p id="modal-description" class="text-sm text-gray-200 leading-relaxed bg-gray-950/60 p-4 rounded-xl border border-gray-800/80 font-normal">--</p>
+                </div>
+
+                <!-- Agency Instructions -->
+                <div id="modal-instructions-box" class="bg-blue-950/30 border border-blue-800/50 p-4 rounded-xl space-y-2">
+                    <h4 class="text-xs font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <i data-lucide="info" class="w-4 h-4"></i> Public Action Required
+                    </h4>
+                    <p id="modal-instructions" class="text-xs text-blue-200 leading-relaxed">--</p>
+                </div>
+
+                <!-- Interactive Incident Map -->
+                <div class="space-y-2">
+                    <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                        <i data-lucide="map-pin" class="w-3.5 h-3.5 text-red-400"></i> Impacted Incident Radius
+                    </h4>
+                    <div id="modal-map" class="h-64 rounded-xl border border-gray-800 overflow-hidden"></div>
+                </div>
+            </div>
+
+            <!-- Modal Footer Actions -->
+            <div class="p-4 bg-gray-950 border-t border-gray-800 flex items-center justify-between">
+                <button id="tts-btn" onclick="speakAlertText()" class="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-medium rounded-lg flex items-center gap-2 border border-gray-700">
+                    <i data-lucide="volume-2" class="w-4 h-4 text-emerald-400"></i>
+                    <span>Read Alert Aloud</span>
+                </button>
+                <button onclick="closeModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition">
+                    Close Details
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert Simulation Modal -->
+    <div id="sim-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-lg p-6 space-y-5">
+            <div class="flex justify-between items-center border-b border-gray-800 pb-3">
+                <h3 class="text-base font-bold text-white flex items-center gap-2">
+                    <i data-lucide="radio" class="w-5 h-5 text-amber-500"></i>
+                    Simulate Agency Emergency Broadcast
+                </h3>
+                <button onclick="closeSimulationModal()" class="text-gray-400 hover:text-white">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <form id="sim-form" onsubmit="handleSimulateSubmit(event)" class="space-y-4 text-xs">
+                <div>
+                    <label class="block text-gray-300 font-medium mb-1">Agency Source</label>
+                    <select id="sim-agency" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-gray-200">
+                        <option value="fcso">Frederick County Sheriff's Office</option>
+                        <option value="fpd">Frederick City Police Department</option>
+                        <option value="fcfir">Frederick County Fire & Rescue (DFERS)</option>
+                        <option value="fdem">Frederick Co. Division of Emergency Management</option>
+                        <option value="msh">Maryland State Highway Administration</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-gray-300 font-medium mb-1">Alert Headline Title</label>
+                    <input type="text" id="sim-title" required placeholder="e.g. Traffic Collision & Power Pole Down on Rt 15" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-gray-200">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-gray-300 font-medium mb-1">Severity Level</label>
+                        <select id="sim-severity" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-gray-200">
+                            <option value="Critical">Critical (Red)</option>
+                            <option value="Warning">Warning (Orange)</option>
+                            <option value="Advisory">Advisory (Yellow)</option>
+                            <option value="Information">Information (Blue)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-gray-300 font-medium mb-1">Location Sub-Area</label>
+                        <input type="text" id="sim-location" required placeholder="e.g. Ballenger Creek / I-270" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-gray-200">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-gray-300 font-medium mb-1">Full Advisory Description</label>
+                    <textarea id="sim-body" required rows="3" placeholder="Provide event details, closures, and instructions..." class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-gray-200"></textarea>
+                </div>
+
+                <div class="pt-2 flex justify-end gap-2">
+                    <button type="button" onclick="closeSimulationModal()" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-semibold rounded-lg">Dispatch Alert Feed</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Application Script -->
+    <script>
+        // Seeded Initial Alerts tailored to Frederick County, MD
+        const INITIAL_ALERTS = [
+            {
+                id: 'fc-101',
+                agencyId: 'fcso',
+                agencyName: "Frederick County Sheriff's Office",
+                title: "Road Closure: US-15 Southbound at MD-180 (Ballenger Creek)",
+                severity: "Warning",
+                category: "Traffic / Road Closure",
+                timestamp: new Date(Date.now() - 15 * 60000).toISOString(), // 15 mins ago
+                location: "US-15 South & MD-180, Ballenger Creek",
+                lat: 39.3821,
+                lng: -77.4265,
+                pinned: true,
+                bookmarked: false,
+                summary: "Southbound US-15 reduced to one lane past MD-180 due to a multi-vehicle collision. Emergency crews on scene.",
+                instructions: "Expect major delays during evening rush. Drivers are strongly advised to seek alternate routes via I-270 or MD-85.",
+                officialCode: "FCSO-TRF-2026-088"
+            },
+            {
+                id: 'fc-102',
+                agencyId: 'fdem',
+                agencyName: "Frederick Co. Division of Emergency Management",
+                title: "Flash Flood Watch issued for Monocacy River Basin",
+                severity: "Critical",
+                category: "Weather Alert",
+                timestamp: new Date(Date.now() - 42 * 60000).toISOString(), // 42 mins ago
+                location: "Monocacy River & Low-lying Frederick Co Areas",
+                lat: 39.4200,
+                lng: -77.3800,
+                pinned: true,
+                bookmarked: true,
+                summary: "Heavy rainfall over the past 24 hours has caused rising water levels along Monocacy River tributaries and low-water bridges.",
+                instructions: "Turn around, don't drown. Never attempt to drive across flooded water crossings or past road barricades.",
+                officialCode: "NWS-FC-FFW-04"
+            },
+            {
+                id: 'fc-103',
+                agencyId: 'fcfir',
+                agencyName: "Frederick Co. Fire & Rescue (DFERS)",
+                title: "Structure Fire Operation: 700 Block of East Patrick Street",
+                severity: "Critical",
+                category: "Fire Activity",
+                timestamp: new Date(Date.now() - 110 * 60000).toISOString(), // ~1.8 hours ago
+                location: "East Patrick St & Highland St, City of Frederick",
+                lat: 39.4125,
+                lng: -77.3990,
+                pinned: false,
+                bookmarked: false,
+                summary: "Units from Station 1 & Station 3 on scene of a working commercial building fire. East Patrick St blocked between Monroe & Highland.",
+                instructions: "Avoid the area to clear lanes for emergency vehicles. Residents downwind should keep windows closed due to heavy smoke.",
+                officialCode: "FC-DFERS-INC-512"
+            },
+            {
+                id: 'fc-104',
+                agencyId: 'fpd',
+                agencyName: "Frederick City Police Dept",
+                title: "Police Activity: Precautionary Perimeter around Baker Park",
+                severity: "Advisory",
+                category: "Public Safety",
+                timestamp: new Date(Date.now() - 210 * 60000).toISOString(), // 3.5 hours ago
+                location: "Baker Park / W 2nd St, Frederick",
+                lat: 39.4180,
+                lng: -77.4205,
+                pinned: false,
+                bookmarked: false,
+                summary: "Officers are investigating a suspicious package near the Baker Park Bandshell area. Pedestrian pathways nearby restricted.",
+                instructions: "Please follow officer directions and avoid the central park promenade until clearing is announced.",
+                officialCode: "FPD-PD-2026-1042"
+            },
+            {
+                id: 'fc-105',
+                agencyId: 'msh',
+                agencyName: "Maryland State Highway (MDOT SHA)",
+                title: "Scheduled Overnight Maintenance: I-70 Westbound at US-340",
+                severity: "Information",
+                category: "Planned Roadwork",
+                timestamp: new Date(Date.now() - 360 * 60000).toISOString(), // 6 hours ago
+                location: "I-70 Westbound Interchange, Frederick",
+                lat: 39.3980,
+                lng: -77.4410,
+                pinned: false,
+                bookmarked: false,
+                summary: "Single lane closures in effect overnight between 9:00 PM and 5:00 AM for bridge deck repair work.",
+                instructions: "Maintain posted reduced speed limits through work zones. Watch for merging construction equipment.",
+                officialCode: "MDOT-SHA-WORK-99"
+            }
+        ];
+
+        // Global State
+        let alertsData = [...INITIAL_ALERTS];
+        let currentModalMap = null;
+        let currentModalAlert = null;
+
+        // On Page Load Initialization
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            renderFeed();
+            updateStats();
+        });
+
+        // Time Formatter
+        function formatRelativeTime(isoString) {
+            const date = new Date(isoString);
+            const diffMs = Date.now() - date.getTime();
+            const diffMins = Math.floor(diffMs / 60000);
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            const diffHours = Math.floor(diffMins / 60);
+            if (diffHours < 24) return `${diffHours}h ago`;
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        }
+
+        // Severity Color Badge Helper
+        function getSeverityBadge(severity) {
+            switch (severity) {
+                case 'Critical':
+                    return `<span class="px-2 py-0.5 rounded text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/40 flex items-center gap-1">
+                                <span class="w-1.5 h-1.5 rounded-full bg-red-500 pulse-red"></span> CRITICAL
+                            </span>`;
+                case 'Warning':
+                    return `<span class="px-2 py-0.5 rounded text-xs font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40">WARNING</span>`;
+                case 'Advisory':
+                    return `<span class="px-2 py-0.5 rounded text-xs font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40">ADVISORY</span>`;
+                default:
+                    return `<span class="px-2 py-0.5 rounded text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/40">INFO</span>`;
+            }
+        }
+
+        // Agency Icon / Label Helper
+        function getAgencyBadge(agencyId) {
+            const map = {
+                'fcso': { name: "Frederick Co. Sheriff", bg: "bg-amber-950/40 border-amber-800/60 text-amber-300" },
+                'fpd': { name: "Frederick City Police", bg: "bg-blue-950/40 border-blue-800/60 text-blue-300" },
+                'fcfir': { name: "Fire & Rescue (DFERS)", bg: "bg-red-950/40 border-red-800/60 text-red-300" },
+                'fdem': { name: "Emergency Mgmt", bg: "bg-purple-950/40 border-purple-800/60 text-purple-300" },
+                'msh': { name: "MDOT SHA", bg: "bg-gray-800 border-gray-700 text-gray-300" },
+                'fcpw': { name: "Public Works", bg: "bg-emerald-950/40 border-emerald-800/60 text-emerald-300" }
+            };
+            const item = map[agencyId] || { name: "Public Agency", bg: "bg-gray-800 border-gray-700 text-gray-300" };
+            return `<span class="px-2 py-0.5 rounded text-xs border font-medium ${item.bg}">${item.name}</span>`;
+        }
+
+        // Render Feed Timeline
+        function renderFeed() {
+            const container = document.getElementById('alert-feed-container');
+            const filtered = getFilteredAlerts();
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="bg-gray-900 border border-gray-800 rounded-xl p-12 text-center space-y-3">
+                        <i data-lucide="shield-check" class="w-12 h-12 text-gray-600 mx-auto"></i>
+                        <h3 class="text-base font-semibold text-gray-300">No matching public safety alerts found</h3>
+                        <p class="text-xs text-gray-500 max-w-sm mx-auto">Try adjusting your category filters or reset your view to see all Frederick County updates.</p>
+                        <button onclick="resetFilters()" class="px-3 py-1.5 text-xs bg-gray-800 text-gray-200 rounded-lg hover:bg-gray-700">Reset Filters</button>
+                    </div>
+                `;
+                lucide.createIcons();
+                return;
+            }
+
+            container.innerHTML = filtered.map(alert => `
+                <article class="bg-gray-900 border ${alert.severity === 'Critical' ? 'border-red-900/60 bg-red-950/10' : 'border-gray-800'} rounded-xl p-5 hover:border-gray-700 transition space-y-3 relative group">
+                    <!-- Top Bar Meta -->
+                    <div class="flex items-center justify-between flex-wrap gap-2">
+                        <div class="flex items-center space-x-2">
+                            ${getSeverityBadge(alert.severity)}
+                            ${getAgencyBadge(alert.agencyId)}
+                            ${alert.pinned ? '<span class="text-xs text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/30 font-medium">Pinned Alert</span>' : ''}
+                        </div>
+                        <div class="flex items-center space-x-2 text-xs text-gray-400">
+                            <i data-lucide="clock" class="w-3.5 h-3.5"></i>
+                            <time datetime="${alert.timestamp}">${formatRelativeTime(alert.timestamp)}</time>
+                            <button onclick="toggleBookmark('${alert.id}')" class="p-1 hover:text-amber-400 transition ml-2" title="Bookmark Alert">
+                                <i data-lucide="bookmark" class="w-4 h-4 ${alert.bookmarked ? 'text-amber-400 fill-amber-400' : 'text-gray-500'}"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Title & Details -->
+                    <div>
+                        <h3 class="text-base font-bold text-white group-hover:text-blue-400 transition cursor-pointer" onclick="openModal('${alert.id}')">
+                            ${alert.title}
+                        </h3>
+                        <div class="flex items-center text-xs text-gray-400 mt-1 space-x-3">
+                            <span class="flex items-center gap-1">
+                                <i data-lucide="map-pin" class="w-3.5 h-3.5 text-red-400"></i>
+                                ${alert.location}
+                            </span>
+                            <span>•</span>
+                            <span class="font-mono text-gray-500">ID: ${alert.officialCode}</span>
+                        </div>
+                    </div>
+
+                    <!-- Summary snippet -->
+                    <p class="text-xs text-gray-300 leading-relaxed line-clamp-2">
+                        ${alert.summary}
+                    </p>
+
+                    <!-- Bottom Action Toolbar -->
+                    <div class="pt-2 border-t border-gray-800/80 flex items-center justify-between text-xs">
+                        <span class="text-gray-400 font-medium">Category: <span class="text-gray-200">${alert.category}</span></span>
+                        <button onclick="openModal('${alert.id}')" class="text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1">
+                            View Official Directive & Map
+                            <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </article>
+            `).join('');
+
+            lucide.createIcons();
+        }
+
+        // Filtering logic
+        function getFilteredAlerts() {
+            const agency = document.getElementById('filter-agency').value;
+            const severity = document.getElementById('filter-severity').value;
+            const sort = document.getElementById('filter-sort').value;
+            const pinnedOnly = document.getElementById('toggle-pinned').checked;
+            const savedOnly = document.getElementById('toggle-saved').checked;
+
+            return alertsData.filter(alert => {
+                if (agency !== 'all' && alert.agencyId !== agency) return false;
+                if (severity !== 'all' && alert.severity !== severity) return false;
+                if (pinnedOnly && !alert.pinned) return false;
+                if (savedOnly && !alert.bookmarked) return false;
+                return true;
+            }).sort((a, b) => {
+                if (sort === 'oldest') {
+                    return new Date(a.timestamp) - new Date(b.timestamp);
+                } else if (sort === 'priority') {
+                    const weight = { 'Critical': 4, 'Warning': 3, 'Advisory': 2, 'Information': 1 };
+                    return weight[b.severity] - weight[a.severity];
+                } else { // 'newest' default
+                    return new Date(b.timestamp) - new Date(a.timestamp);
+                }
+            });
+        }
+
+        function applyFilters() {
+            renderFeed();
+        }
+
+        function resetFilters() {
+            document.getElementById('filter-agency').value = 'all';
+            document.getElementById('filter-severity').value = 'all';
+            document.getElementById('filter-sort').value = 'newest';
+            document.getElementById('toggle-pinned').checked = false;
+            document.getElementById('toggle-saved').checked = false;
+            renderFeed();
+        }
+
+        function updateStats() {
+            document.getElementById('active-alert-count').textContent = alertsData.length;
+            document.getElementById('last-updated-time').textContent = 'Updated ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        }
+
+        function toggleBookmark(id) {
+            const item = alertsData.find(a => a.id === id);
+            if (item) {
+                item.bookmarked = !item.bookmarked;
+                renderFeed();
+            }
+        }
+
+        function toggleTicker() {
+            document.getElementById('ticker-banner').style.display = 'none';
+        }
+
+        function fetchLatestAlerts() {
+            const icon = document.getElementById('refresh-icon');
+            icon.classList.add('animate-spin');
+            setTimeout(() => {
+                icon.classList.remove('animate-spin');
+                updateStats();
+            }, 600);
+        }
+
+        // Modal Operations & Leaflet Map Rendering
+        function openModal(id) {
+            const alert = alertsData.find(a => a.id === id);
+            if (!alert) return;
+
+            currentModalAlert = alert;
+
+            document.getElementById('modal-title').textContent = alert.title;
+            document.getElementById('modal-subtitle').textContent = `Published by ${alert.agencyName} • ${formatRelativeTime(alert.timestamp)}`;
+            document.getElementById('modal-description').textContent = alert.summary;
+            document.getElementById('modal-instructions').textContent = alert.instructions;
+
+            document.getElementById('modal-badge-container').innerHTML = `
+                ${getSeverityBadge(alert.severity)}
+                ${getAgencyBadge(alert.agencyId)}
+            `;
+
+            document.getElementById('detail-modal').classList.remove('hidden');
+
+            // Initialize or Re-center Map
+            setTimeout(() => {
+                if (!currentModalMap) {
+                    currentModalMap = L.map('modal-map').setView([alert.lat, alert.lng], 14);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '&copy; OpenStreetMap contributors'
+                    }).addTo(currentModalMap);
+                } else {
+                    currentModalMap.invalidateSize();
+                    currentModalMap.setView([alert.lat, alert.lng], 14);
+                }
+
+                // Clear prior markers
+                currentModalMap.eachLayer((layer) => {
+                    if (layer instanceof L.Marker || layer instanceof L.Circle) {
+                        currentModalMap.removeLayer(layer);
+                    }
+                });
+
+                // Add Circle & Marker
+                L.marker([alert.lat, alert.lng]).addTo(currentModalMap)
+                    .bindPopup(`<b>${alert.title}</b><br>${alert.location}`)
+                    .openPopup();
+
+                L.circle([alert.lat, alert.lng], {
+                    color: alert.severity === 'Critical' ? '#ef4444' : '#f59e0b',
+                    fillColor: alert.severity === 'Critical' ? '#ef4444' : '#f59e0b',
+                    fillOpacity: 0.25,
+                    radius: 800
+                }).addTo(currentModalMap);
+
+            }, 200);
+
+            lucide.createIcons();
+        }
+
+        function closeModal() {
+            document.getElementById('detail-modal').classList.add('hidden');
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+            }
+        }
+
+        // Text To Speech Accessibility Feature
+        function speakAlertText() {
+            if (!currentModalAlert) return;
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel(); // Stop active speech
+                const text = `Public Safety Alert from ${currentModalAlert.agencyName}. ${currentModalAlert.title}. Location: ${currentModalAlert.location}. Details: ${currentModalAlert.summary}. Instructions: ${currentModalAlert.instructions}`;
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 0.95;
+                window.speechSynthesis.speak(utterance);
+            } else {
+                alert('Text-to-speech functionality is not supported in this browser.');
+            }
+        }
+
+        // Simulation Modal Handler
+        function openSimulationModal() {
+            document.getElementById('sim-modal').classList.remove('hidden');
+        }
+
+        function closeSimulationModal() {
+            document.getElementById('sim-modal').classList.add('hidden');
+        }
+
+        function handleSimulateSubmit(e) {
+            e.preventDefault();
+            const agencyId = document.getElementById('sim-agency').value;
+            const agencySelect = document.getElementById('sim-agency');
+            const agencyName = agencySelect.options[agencySelect.selectedIndex].text;
+            const title = document.getElementById('sim-title').value;
+            const severity = document.getElementById('sim-severity').value;
+            const location = document.getElementById('sim-location').value;
+            const body = document.getElementById('sim-body').value;
+
+            const newAlert = {
+                id: 'sim-' + Date.now(),
+                agencyId: agencyId,
+                agencyName: agencyName,
+                title: title,
+                severity: severity,
+                category: "Simulated Broadcast",
+                timestamp: new Date().toISOString(),
+                location: location + " (Frederick Co)",
+                lat: 39.4143 + (Math.random() - 0.5) * 0.05,
+                lng: -77.4105 + (Math.random() - 0.5) * 0.05,
+                pinned: true,
+                bookmarked: false,
+                summary: body,
+                instructions: "This is a simulated emergency alert broadcast. Please follow default area guidelines.",
+                officialCode: "SIM-FC-" + Math.floor(1000 + Math.random() * 9000)
+            };
+
+            alertsData.unshift(newAlert);
+            renderFeed();
+            updateStats();
+            closeSimulationModal();
+            document.getElementById('sim-form').reset();
+        }
+    </script>
+</body>
+</html>
